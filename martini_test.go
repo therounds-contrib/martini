@@ -1,6 +1,7 @@
 package martini
 
 import (
+	stdcontext "context"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -142,4 +143,27 @@ func Test_Martini_Basic_NoRace(t *testing.T) {
 			m.ServeHTTP(response, req)
 		}()
 	}
+}
+
+func Test_Martini_Context(t *testing.T) {
+	result := ""
+	response := httptest.NewRecorder()
+
+	type key string
+	middlewareKey := key("middleware")
+
+	m := New()
+	m.Use(func(c Context) {
+		c.MapContext(stdcontext.WithValue(c, middlewareKey, "middleware context value"))
+		c.Next()
+	})
+	m.Action(func(c Context, res http.ResponseWriter) {
+		result = c.Value(middlewareKey).(string)
+	})
+
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
+	m.ServeHTTP(response, req)
+
+	expect(t, result, "middleware context value")
+	expect(t, response.Code, http.StatusOK)
 }

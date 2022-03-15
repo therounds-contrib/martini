@@ -18,10 +18,12 @@
 package martini
 
 import (
+	stdcontext "context"
 	"log"
 	"net/http"
 	"os"
 	"reflect"
+	"time"
 
 	"github.com/codegangsta/inject"
 )
@@ -102,6 +104,11 @@ func (m *Martini) createContext(res http.ResponseWriter, req *http.Request) *con
 	c := &context{inject.New(), m.handlers, m.action, NewResponseWriter(res), 0}
 	c.SetParent(m)
 	c.MapTo(c, (*Context)(nil))
+	if req != nil {
+		c.MapTo(req.Context(), (*stdcontext.Context)(nil))
+	} else {
+		c.MapTo(stdcontext.Background(), (*stdcontext.Context)(nil))
+	}
 	c.MapTo(c.rw, (*http.ResponseWriter)(nil))
 	c.Map(req)
 	return c
@@ -138,6 +145,18 @@ func validateHandler(handler Handler) {
 
 // Context represents a request context. Services can be mapped on the request level from this interface.
 type Context interface {
+	// Context is provided by a mapped context.Context value. See MapContext.
+	// For newly-instantiated Martini contexts, the HTTP request context is
+	// mapped; if no request is available, the background context is used.
+	stdcontext.Context
+	// MapContext maps the standard context value. This is a convenience method
+	// to avoid the complexity of mapping interface types. It is equivalent to:
+	//
+	//     martiniContext.MapTo(standardContext, (*context.Context)(nil))
+	//
+	// This is chiefly useful for middleware to attach values to the context.
+	MapContext(stdcontext.Context) inject.TypeMapper
+
 	inject.Injector
 	// Next is an optional function that Middleware Handlers can call to yield the until after
 	// the other Handlers have been executed. This works really well for any operations that must
@@ -153,6 +172,35 @@ type context struct {
 	action   Handler
 	rw       ResponseWriter
 	index    int
+}
+
+// context implements Context.
+var _ Context = &context{}
+
+var contextIfaceType = inject.InterfaceOf((*stdcontext.Context)(nil))
+
+func (c *context) getContext() stdcontext.Context {
+	return c.Get(contextIfaceType).Interface().(stdcontext.Context)
+}
+
+func (c *context) Deadline() (deadline time.Time, ok bool) {
+	return c.getContext().Deadline()
+}
+
+func (c *context) Done() <-chan struct{} {
+	return c.getContext().Done()
+}
+
+func (c *context) Err() error {
+	return c.getContext().Err()
+}
+
+func (c *context) Value(key interface{}) interface{} {
+	return c.getContext().Value(key)
+}
+
+func (c *context) MapContext(ctx stdcontext.Context) inject.TypeMapper {
+	return c.MapTo(ctx, (*stdcontext.Context)(nil))
 }
 
 func (c *context) handler() Handler {
